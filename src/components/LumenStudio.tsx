@@ -257,8 +257,8 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
               type="button"
               onClick={() => {
                 setAuthErr(null);
-                setCodeSent(false);
-                setMailTip(null);
+                setPassword("");
+                setPassword2("");
                 setAuthOpen(true);
               }}
               className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-xs font-medium text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.15)] transition hover:bg-cyan-500/20"
