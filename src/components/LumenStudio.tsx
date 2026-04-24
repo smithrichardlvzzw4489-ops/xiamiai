@@ -230,11 +230,11 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
       <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-500/10 shadow-[0_0_24px_rgba(34,211,238,0.25)]">
-            <span className="font-mono text-sm font-semibold tracking-tight text-cyan-200">隙</span>
+            <span className="font-mono text-sm font-semibold tracking-tight text-cyan-200">虾</span>
           </div>
           <div>
-            <h1 className="text-sm font-medium tracking-[0.2em] text-zinc-100">隙光</h1>
-            <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-500">Image lab</p>
+            <h1 className="text-sm font-medium tracking-[0.08em] text-zinc-100">虾米AI</h1>
+            <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-500">XIAMI AI</p>
           </div>
         </div>
         <div className="flex items-center gap-3">

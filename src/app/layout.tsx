@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "隙光 · 对话式图像生成",
-  description: "简洁、科技感十足的图像实验室 — 邮箱注册，每日免费额度。",
+  title: "虾米AI · 对话式图像生成",
+  description: "虾米AI — 简洁对话式图像生成，每日免费额度。",
 };
 
 export default function RootLayout({
