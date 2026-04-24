@@ -5,10 +5,11 @@
   "scripts": {
     "clean": "node scripts/clean.cjs",
     "dev": "next dev",
-    "build": "prisma migrate deploy && prisma generate && next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push"
   },
   "dependencies": {
