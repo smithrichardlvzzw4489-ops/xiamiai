@@ -1,4 +1,3 @@
-import { OpenRouter } from "@openrouter/sdk";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -7,48 +6,74 @@ import { DAILY_FREE_LIMIT, utcDayString } from "@/lib/usage";
 
 export const runtime = "nodejs";
 
-/** OpenRouter / OpenAI-style assistant message; images often live in `content[]`, not `images`. */
-function extractImageUrlsFromAssistantMessage(message: unknown): string[] {
-  if (!message || typeof message !== "object") return [];
-  const m = message as Record<string, unknown>;
+const DEFAULT_OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const DEFAULT_IMAGE_MODEL = "openai/gpt-5.4-image-2";
+
+/** Walk raw API JSON: SDK Zod schemas strip unknown keys (e.g. `images`), so we use untyped JSON + deep walk. */
+function deepCollectImageUrls(node: unknown): string[] {
   const urls: string[] = [];
+  const seen = new Set<unknown>();
 
-  const images = m.images;
-  if (Array.isArray(images)) {
-    for (const img of images) {
-      if (!img || typeof img !== "object") continue;
-      const im = img as Record<string, unknown>;
-      const iu = im.image_url ?? im.imageUrl;
-      if (iu && typeof iu === "object" && typeof (iu as Record<string, unknown>).url === "string") {
-        urls.push(String((iu as Record<string, unknown>).url));
-      }
+  function addUrl(s: string) {
+    const t = s.trim();
+    if (t.startsWith("http://") || t.startsWith("https://") || t.startsWith("data:image")) {
+      urls.push(t);
     }
   }
 
-  const content = m.content;
-  if (Array.isArray(content)) {
-    for (const part of content) {
-      if (!part || typeof part !== "object") continue;
-      const p = part as Record<string, unknown>;
-      if (p.type === "image_url") {
-        const iu = p.imageUrl ?? p.image_url;
-        if (iu && typeof iu === "object" && typeof (iu as Record<string, unknown>).url === "string") {
-          urls.push(String((iu as Record<string, unknown>).url));
-        }
+  function walk(n: unknown): void {
+    if (n == null || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
+
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+
+    const o = n as Record<string, unknown>;
+
+    if (o.type === "image_url") {
+      const wrap = o.image_url ?? o.imageUrl;
+      if (wrap && typeof wrap === "object" && typeof (wrap as Record<string, unknown>).url === "string") {
+        addUrl(String((wrap as Record<string, unknown>).url));
       }
     }
-  } else if (typeof content === "string") {
-    const md = /!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g;
-    let match: RegExpExecArray | null;
-    while ((match = md.exec(content)) !== null) {
-      urls.push(match[1]);
-    }
-    if (content.startsWith("data:image") && content.includes(";base64,")) {
-      urls.push(content.trim().split(/\s/)[0]);
+
+    for (const [k, v] of Object.entries(o)) {
+      if ((k === "image_url" || k === "imageUrl") && v != null && typeof v === "object") {
+        const u = (v as Record<string, unknown>).url;
+        if (typeof u === "string") addUrl(u);
+      }
+      walk(v);
     }
   }
 
+  walk(node);
   return [...new Set(urls)];
+}
+
+function collectImageUrlsFromMessage(message: unknown): string[] {
+  const fromDeep = deepCollectImageUrls(message);
+  if (fromDeep.length) return fromDeep;
+
+  if (message && typeof message === "object" && "content" in message) {
+    const c = (message as { content?: unknown }).content;
+    if (typeof c === "string") {
+      const urls: string[] = [];
+      const md = /!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g;
+      let match: RegExpExecArray | null;
+      while ((match = md.exec(c)) !== null) {
+        urls.push(match[1]);
+      }
+      if (c.startsWith("data:image") && c.includes(";base64,")) {
+        urls.push(c.trim().split(/\s/)[0]);
+      }
+      return [...new Set(urls)];
+    }
+  }
+
+  return [];
 }
 
 const bodySchema = z.object({
@@ -91,20 +116,56 @@ export async function POST(req: Request) {
     );
   }
 
-  const openrouter = new OpenRouter({ apiKey });
+  const base = (process.env.OPENROUTER_BASE_URL?.trim() || DEFAULT_OPENROUTER_BASE).replace(/\/$/, "");
+  const chatUrl = `${base}/chat/completions`;
+  const model = process.env.OPENROUTER_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODEL;
 
   let result: unknown;
   try {
-    result = await openrouter.chat.send({
-      model: "openai/gpt-5.4-image-2",
-      messages: [
-        {
-          role: "user",
-          content: parsed.data.prompt,
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 280_000);
+    let res: Response;
+    try {
+      res = await fetch(chatUrl, {
+        method: "POST",
+        signal: ac.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+          "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER?.trim() || "https://www.xiami.club",
+          "X-Title": process.env.OPENROUTER_APP_TITLE?.trim() || "虾米AI",
         },
-      ],
-      modalities: ["image", "text"],
-    } as never);
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: parsed.data.prompt }],
+          modalities: ["image", "text"],
+        }),
+      });
+    } finally {
+      clearTimeout(t);
+    }
+
+    const raw = await res.text();
+    try {
+      result = JSON.parse(raw) as unknown;
+    } catch {
+      return NextResponse.json(
+        { error: `OpenRouter 返回非 JSON（HTTP ${res.status}）` },
+        { status: 502 },
+      );
+    }
+
+    if (!res.ok) {
+      const errMsg =
+        result &&
+        typeof result === "object" &&
+        "error" in result &&
+        (result as { error?: { message?: string } }).error?.message;
+      return NextResponse.json(
+        { error: typeof errMsg === "string" ? errMsg : `OpenRouter 错误 HTTP ${res.status}` },
+        { status: res.status >= 400 && res.status < 600 ? res.status : 502 },
+      );
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "生成失败";
     return NextResponse.json({ error: msg }, { status: 502 });
@@ -121,7 +182,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: refusal.trim() }, { status: 422 });
   }
 
-  const urls = extractImageUrlsFromAssistantMessage(message);
+  const urls = collectImageUrlsFromMessage(message);
 
   if (!urls.length) {
     let text = "模型未返回图片，请缩短或简化描述后重试。";
