@@ -7,17 +7,52 @@ import { DAILY_FREE_LIMIT, utcDayString } from "@/lib/usage";
 
 export const runtime = "nodejs";
 
-type ImageChatResult = {
-  choices: Array<{
-    message?: {
-      images?: { image_url?: { url?: string } }[];
-      content?: string | unknown;
-    };
-  }>;
-};
+/** OpenRouter / OpenAI-style assistant message; images often live in `content[]`, not `images`. */
+function extractImageUrlsFromAssistantMessage(message: unknown): string[] {
+  if (!message || typeof message !== "object") return [];
+  const m = message as Record<string, unknown>;
+  const urls: string[] = [];
+
+  const images = m.images;
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      if (!img || typeof img !== "object") continue;
+      const im = img as Record<string, unknown>;
+      const iu = im.image_url ?? im.imageUrl;
+      if (iu && typeof iu === "object" && typeof (iu as Record<string, unknown>).url === "string") {
+        urls.push(String((iu as Record<string, unknown>).url));
+      }
+    }
+  }
+
+  const content = m.content;
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const p = part as Record<string, unknown>;
+      if (p.type === "image_url") {
+        const iu = p.imageUrl ?? p.image_url;
+        if (iu && typeof iu === "object" && typeof (iu as Record<string, unknown>).url === "string") {
+          urls.push(String((iu as Record<string, unknown>).url));
+        }
+      }
+    }
+  } else if (typeof content === "string") {
+    const md = /!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = md.exec(content)) !== null) {
+      urls.push(match[1]);
+    }
+    if (content.startsWith("data:image") && content.includes(";base64,")) {
+      urls.push(content.trim().split(/\s/)[0]);
+    }
+  }
+
+  return [...new Set(urls)];
+}
 
 const bodySchema = z.object({
-  prompt: z.string().min(1).max(4000),
+  prompt: z.string().min(1).max(16_000),
 });
 
 export async function POST(req: Request) {
@@ -58,9 +93,9 @@ export async function POST(req: Request) {
 
   const openrouter = new OpenRouter({ apiKey });
 
-  let result: ImageChatResult;
+  let result: unknown;
   try {
-    result = (await openrouter.chat.send({
+    result = await openrouter.chat.send({
       model: "openai/gpt-5.4-image-2",
       messages: [
         {
@@ -69,27 +104,31 @@ export async function POST(req: Request) {
         },
       ],
       modalities: ["image", "text"],
-    } as never)) as ImageChatResult;
+    } as never);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "生成失败";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  const message = result.choices[0]?.message;
+  const choices = (result as { choices?: unknown[] })?.choices;
+  const message = Array.isArray(choices) ? (choices[0] as { message?: unknown })?.message : undefined;
 
-  const urls: string[] = [];
-  if (message?.images?.length) {
-    for (const image of message.images) {
-      const u = image.image_url?.url;
-      if (u) urls.push(u);
-    }
+  const refusal =
+    message && typeof message === "object" && "refusal" in message
+      ? (message as { refusal?: string | null }).refusal
+      : null;
+  if (typeof refusal === "string" && refusal.trim()) {
+    return NextResponse.json({ error: refusal.trim() }, { status: 422 });
   }
 
+  const urls = extractImageUrlsFromAssistantMessage(message);
+
   if (!urls.length) {
-    const text =
-      typeof message?.content === "string"
-        ? message.content
-        : "模型未返回图片，请调整描述后重试。";
+    let text = "模型未返回图片，请缩短或简化描述后重试。";
+    if (message && typeof message === "object" && "content" in message) {
+      const c = (message as { content?: unknown }).content;
+      if (typeof c === "string" && c.trim()) text = c.trim();
+    }
     return NextResponse.json({ error: text }, { status: 422 });
   }
 
