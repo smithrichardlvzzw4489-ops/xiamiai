@@ -28,15 +28,9 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
   const [authTab, setAuthTab] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
+  const [password2, setPassword2] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState<string | null>(null);
-  const [codeSent, setCodeSent] = useState(false);
-  const [mailTip, setMailTip] = useState<
-    | null
-    | { kind: "dev"; code: string }
-    | { kind: "sent"; channel: string }
-  >(null);
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -62,45 +56,19 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
     void refreshMe();
   };
 
-  const sendCode = async () => {
+  const register = async () => {
     setAuthErr(null);
-    setAuthBusy(true);
-    try {
-      const r = await fetch("/api/auth/register/send-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email }),
-      });
-      const { httpOk, errorMessage, json } = await parseFetchJson(r);
-      if (!httpOk) {
-        setAuthErr(errorMessage ?? "发送失败");
-        return;
-      }
-      const ch = typeof json.mailChannel === "string" ? json.mailChannel : "";
-      const devCode = typeof json.devCode === "string" ? json.devCode : "";
-      if (ch === "console" && devCode) {
-        setMailTip({ kind: "dev", code: devCode });
-      } else if (ch) {
-        setMailTip({ kind: "sent", channel: ch });
-      } else {
-        setMailTip(null);
-      }
-      setCodeSent(true);
-    } finally {
-      setAuthBusy(false);
+    if (password !== password2) {
+      setAuthErr("两次输入的密码不一致");
+      return;
     }
-  };
-
-  const verifyRegister = async () => {
-    setAuthErr(null);
     setAuthBusy(true);
     try {
-      const r = await fetch("/api/auth/register/verify", {
+      const r = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, code, password }),
+        body: JSON.stringify({ email, password }),
       });
       const { httpOk, errorMessage } = await parseFetchJson(r);
       if (!httpOk) {
@@ -110,8 +78,7 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
       setAuthOpen(false);
       setEmail("");
       setPassword("");
-      setCode("");
-      setCodeSent(false);
+      setPassword2("");
       void refreshMe();
     } finally {
       setAuthBusy(false);
@@ -410,10 +377,8 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
                   onClick={() => {
                     setAuthTab(t);
                     setAuthErr(null);
-                    setCodeSent(false);
-                    setCode("");
                     setPassword("");
-                    setMailTip(null);
+                    setPassword2("");
                   }}
                   className={`flex-1 rounded-md py-2 text-xs font-medium transition ${
                     authTab === t
@@ -425,14 +390,6 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
                 </button>
               ))}
             </div>
-
-            {authTab === "register" && (
-              <div className="mb-4 flex items-center justify-center gap-2 font-mono text-[10px] tracking-widest text-zinc-500">
-                <span className={codeSent ? "text-zinc-600" : "text-cyan-400"}>① 邮箱验证</span>
-                <span className="text-zinc-700">—</span>
-                <span className={codeSent ? "text-cyan-400" : "text-zinc-600"}>② 密码与完成</span>
-              </div>
-            )}
 
             <div className="space-y-3">
               {authTab === "login" ? (
@@ -458,10 +415,10 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
                     className={authFieldClass}
                   />
                 </>
-              ) : !codeSent ? (
+              ) : (
                 <>
                   <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500">
-                    注册邮箱
+                    邮箱
                   </label>
                   <input
                     type="email"
@@ -471,55 +428,8 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
                     placeholder="name@example.com"
                     className={authFieldClass}
                   />
-                  <p className="text-xs leading-relaxed text-zinc-500">
-                    需配置 Resend 或 SMTP 才会发到真实邮箱；未配置时仅在开发环境在终端与下一步界面显示验证码。
-                  </p>
-                </>
-              ) : (
-                <>
-                  {mailTip?.kind === "dev" && (
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95">
-                      <p className="font-medium text-amber-200">开发模式 · 未配置发信</p>
-                      <p className="mt-1 text-amber-100/80">
-                        验证码（勿用于生产）：{" "}
-                        <span className="font-mono text-base tracking-[0.2em] text-white">{mailTip.code}</span>
-                      </p>
-                      <p className="mt-1 text-[11px] text-amber-200/70">
-                        同时已打印在运行 <code className="text-amber-100">npm run dev</code> 的终端。配置 RESEND_API_KEY 或
-                        SMTP 后即可收真实邮件。
-                      </p>
-                    </div>
-                  )}
-                  {mailTip?.kind === "sent" && (
-                    <div className="rounded-lg border border-emerald-500/25 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-100/90">
-                      已通过
-                      <span className="mx-1 font-mono text-emerald-200">
-                        {mailTip.channel === "resend" ? "Resend" : "SMTP"}
-                      </span>
-                      投递，请查收收件箱与垃圾箱。
-                    </div>
-                  )}
-                  <div>
-                    <p className="mb-1 text-[11px] font-mono uppercase tracking-wider text-zinc-500">已验证邮箱</p>
-                    <div className="rounded-lg border border-white/[0.08] bg-black/35 px-3 py-2 font-mono text-sm text-cyan-200/90">
-                      {email || "—"}
-                    </div>
-                  </div>
                   <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500">
-                    邮箱验证码
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="000000"
-                    className={`${authFieldClass} text-center font-mono text-lg tracking-[0.35em]`}
-                  />
-                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500">
-                    设置登录密码
+                    密码
                   </label>
                   <input
                     type="password"
@@ -529,54 +439,33 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
                     placeholder="至少 8 位"
                     className={authFieldClass}
                   />
-                  <div className="flex flex-wrap gap-3 pt-1 text-xs">
-                    <button
-                      type="button"
-                      disabled={authBusy}
-                      onClick={() => void sendCode()}
-                      className="text-cyan-400/90 underline-offset-2 hover:underline disabled:opacity-40"
-                    >
-                      重新发送验证码
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCodeSent(false);
-                        setCode("");
-                        setPassword("");
-                        setAuthErr(null);
-                        setMailTip(null);
-                      }}
-                      className="text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
-                    >
-                      返回上一步
-                    </button>
-                  </div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500">
+                    确认密码
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={password2}
+                    onChange={(e) => setPassword2(e.target.value)}
+                    placeholder="再次输入密码"
+                    className={authFieldClass}
+                  />
                 </>
               )}
               {authErr && <p className="text-xs text-red-300/90">{authErr}</p>}
             </div>
             <div className="mt-6 flex flex-col gap-2">
               {authTab === "register" ? (
-                !codeSent ? (
-                  <button
-                    type="button"
-                    disabled={authBusy || !email.trim()}
-                    onClick={() => void sendCode()}
-                    className="w-full rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-700 py-2.5 text-sm font-medium text-white shadow-lg shadow-cyan-900/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {authBusy ? "发送中…" : "发送验证码到邮箱"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={authBusy || code.length !== 6 || password.length < 8}
-                    onClick={() => void verifyRegister()}
-                    className="w-full rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-700 py-2.5 text-sm font-medium text-white shadow-lg shadow-cyan-900/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {authBusy ? "提交中…" : "验证并完成注册"}
-                  </button>
-                )
+                <button
+                  type="button"
+                  disabled={
+                    authBusy || !email.trim() || password.length < 8 || password2.length < 8
+                  }
+                  onClick={() => void register()}
+                  className="w-full rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-700 py-2.5 text-sm font-medium text-white shadow-lg shadow-cyan-900/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {authBusy ? "注册中…" : "注册"}
+                </button>
               ) : (
                 <button
                   type="button"
@@ -590,7 +479,6 @@ export function LumenStudio({ initialMe }: { initialMe: Me }) {
               <button
                 type="button"
                 onClick={() => {
-                  setMailTip(null);
                   setAuthOpen(false);
                 }}
                 className="py-2 text-xs text-zinc-500 hover:text-zinc-300"

@@ -16,14 +16,6 @@ model User {
   usageDays    UsageDay[]
 }
 
-model RegistrationIntent {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  codeHash  String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-}
-
 model UsageDay {
   id     String @id @default(cuid())
   userId String
