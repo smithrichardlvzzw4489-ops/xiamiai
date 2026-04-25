@@ -9,6 +9,19 @@ export const runtime = "nodejs";
 const DEFAULT_OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const DEFAULT_IMAGE_MODEL = "openai/gpt-5.4-image-2";
 
+/**
+ * Fetch header values are ByteString (Latin-1 only per char code ≤ 255).
+ * Chinese in e.g. X-Title throws: "Cannot convert argument to a ByteString…".
+ */
+function headerValueOrAsciiFallback(value: string | undefined, fallback: string): string {
+  const v = value?.trim();
+  if (!v) return fallback;
+  for (let i = 0; i < v.length; i++) {
+    if (v.charCodeAt(i) > 255) return fallback;
+  }
+  return v;
+}
+
 /** Walk raw API JSON: SDK Zod schemas strip unknown keys (e.g. `images`), so we use untyped JSON + deep walk. */
 function deepCollectImageUrls(node: unknown): string[] {
   const urls: string[] = [];
@@ -132,8 +145,11 @@ export async function POST(req: Request) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
-          "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER?.trim() || "https://www.xiami.club",
-          "X-Title": process.env.OPENROUTER_APP_TITLE?.trim() || "虾米AI",
+          "HTTP-Referer": headerValueOrAsciiFallback(
+            process.env.OPENROUTER_HTTP_REFERER,
+            "https://www.xiami.club",
+          ),
+          "X-Title": headerValueOrAsciiFallback(process.env.OPENROUTER_APP_TITLE, "Xiami AI"),
         },
         body: JSON.stringify({
           model,
